@@ -28,7 +28,7 @@ def single_output(origin: npy.ndarray, boxes: npy.ndarray, scores: npy.ndarray, 
 
 def test_folder(model: torch.nn.Module, device: torch.device, path: str, output_path: str, verbose: bool, threshold: float, batch_size: int):
     images_test = list(filter(
-        lambda x: x.endswith(".jpg") or x.endswith(".JPG") or x.endswith(".png"),
+        lambda x: x.endswith(".jpg") or x.endswith(".jpeg") or x.endswith(".png") or x.endswith(".JPG") or x.endswith(".PNG"),
         os.listdir(path)
     ))
 
@@ -43,6 +43,8 @@ def test_folder(model: torch.nn.Module, device: torch.device, path: str, output_
         imgs.append(npy.array(img))
         img = npy.array(img.resize((256, 256), Image.LANCZOS)).astype(npy.float32) * 2.0 / 255.0 - 1
         ts = transforms.ToTensor()(img).to(device)
+        if ts.shape[0] > 3:
+            raise ValueError("Invalid image:", filename)
         inputs.append(ts)
 
         if len(inputs) >= batch_size:
@@ -57,6 +59,17 @@ def test_folder(model: torch.nn.Module, device: torch.device, path: str, output_
 
                 single_output(img, boxes, scores, os.path.join(output_path, filenames[i]), verbose, threshold)
             inputs = []
+    if len(inputs) >= 0:
+        out = model(inputs)
+        for i in range(len(inputs)):
+            img = imgs[i]
+            boxes = out[i]['boxes'].detach().cpu().numpy()
+            scores = out[i]['scores'].detach().cpu().numpy()
+            
+            if verbose:
+                print(filenames[i], out[i])
+                
+            single_output(img, boxes, scores, os.path.join(output_path, filenames[i]), verbose, threshold)
 
 def test_single(model: torch.nn.Module, device: torch.device, img_path: str, output_path: str, verbose: bool, threshold: float):
     img = Image.open(img_path)
