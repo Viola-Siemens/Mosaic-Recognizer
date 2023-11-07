@@ -35,10 +35,10 @@ Finally, use it to recognize all mosaics in your picture.
 
 For one single photo:
 ```
-python recognizer.py --threshold 0.1 --filename 1.png --output output
+python recognizer.py --model path/to/model/filename.pth --threshold 0.1 --filename 1.png --output output
 ```
 
 For a folder:
 ```
-python recognizer.py --threshold 0.1 --folder input --output output
+python recognizer.py --model path/to/model/filename.pth --threshold 0.1 --folder input --output output
 ```
