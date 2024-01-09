@@ -7,6 +7,9 @@ import numpy as npy
 from typing import List
 
 
+border_color = (63, 191, 255)    # default cyan border
+border_stength = 2               # width of border
+
 def single_output(origin: npy.ndarray, boxes: npy.ndarray, scores: npy.ndarray, output_filename: str, verbose: bool, threshold: float):
     origin_size = origin.shape
 
@@ -14,14 +17,14 @@ def single_output(origin: npy.ndarray, boxes: npy.ndarray, scores: npy.ndarray, 
         if scores[b] < threshold:
             continue
         x1, y1, x2, y2 = boxes[b]
-        x1 = int(x1 * origin_size[0] / 256)
-        x2 = int(x2 * origin_size[0] / 256)
-        y1 = int(y1 * origin_size[1] / 256)
-        y2 = int(y2 * origin_size[1] / 256)
-        origin[y1 - 1 : y1 + 1, x1 - 1 : x2 + 1] = 255
-        origin[y2 - 1 : y2 + 1, x1 - 1 : x2 + 1] = 255
-        origin[y1 - 1 : y2 + 1, x1 - 1 : x1 + 1] = 255
-        origin[y1 - 1 : y2 + 1, x2 - 1 : x2 + 1] = 255
+        x1 = int(x1 * origin_size[1] / 256)
+        x2 = int(x2 * origin_size[1] / 256)
+        y1 = int(y1 * origin_size[0] / 256)
+        y2 = int(y2 * origin_size[0] / 256)
+        origin[y1 - border_stength : y1 + border_stength, x1 - border_stength : x2 + border_stength, :] = border_color
+        origin[y2 - border_stength : y2 + border_stength, x1 - border_stength : x2 + border_stength, :] = border_color
+        origin[y1 - border_stength : y2 + border_stength, x1 - border_stength : x1 + border_stength, :] = border_color
+        origin[y1 - border_stength : y2 + border_stength, x2 - border_stength : x2 + border_stength, :] = border_color
 
     Image.fromarray(origin).save(output_filename)
 
@@ -59,6 +62,8 @@ def test_folder(model: torch.nn.Module, device: torch.device, path: str, output_
 
                 single_output(img, boxes, scores, os.path.join(output_path, filenames[i]), verbose, threshold)
             inputs = []
+            filenames = []
+            imgs = []
     if len(inputs) >= 0:
         out = model(inputs)
         for i in range(len(inputs)):
