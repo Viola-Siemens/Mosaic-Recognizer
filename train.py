@@ -430,12 +430,12 @@ print("Loaded %d train images and %d val images."%(len(train_dataset), len(val_d
 # test(train_data_iter)
 
 device = torch.device('cuda')
-model = torchvision.models.detection.fasterrcnn_resnet50_fpn(num_classes=2)
+model = torchvision.models.detection.fasterrcnn_resnet50_fpn(num_classes=4)
 # model = torch.load("models/checkpoint/detector-2.pth")
 # print("Let's use", torch.cuda.device_count(), "GPUs!")
 # model = torch.nn.DataParallel(model)
 model.to(device)
-optimizer = torch.optim.RMSprop(model.parameters(), lr=5e-3, weight_decay=8e-5)
+optimizer = torch.optim.RMSprop(model.parameters(), lr=1e-3, weight_decay=8e-5)
 
 from detection.engine import train_one_epoch, evaluate
 
