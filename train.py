@@ -1,7 +1,10 @@
 import os
+import io
 import re
 import random
+import imageio
 from typing import List, Tuple, Callable
+import scipy.stats as stats
 
 import numpy as npy
 from PIL import Image
@@ -60,6 +63,12 @@ def blur2(img: npy.ndarray, radius: int, x1: int, y1: int, x2: int, y2: int, w: 
         for y in range(y1, y2):
             img[y, x] = img[max(0, y - radius) : min(y + radius + 1, h), max(0, x - radius) : min(x + radius + 1, w)].mean(axis=(0, 1))
 
+def jpegBlur(im):
+    buf = io.BytesIO()
+    imageio.imwrite(buf, im, format='jpg',quality=random.randint(5, 75))
+    s = buf.getbuffer()
+    return imageio.imread(s, format='jpg')
+
 def choose_and_mask(a: int, img: npy.ndarray, radius: int, x1: int, y1: int, x2: int, y2: int, w: int, h: int, color: Tuple[int, int, int]):
     if a < 24:
         mosaic1(img, radius, x1, y1, x2, y2, w, h)
@@ -71,6 +80,16 @@ def choose_and_mask(a: int, img: npy.ndarray, radius: int, x1: int, y1: int, x2:
         blur1(img, radius, x1, y1, x2, y2, w, h)
     else:
         blur2(img, radius, x1, y1, x2, y2, w, h)
+    if random.randint(0, 9) < 4:
+        img = img + npy.random.laplace(0.0, random.randint(0, 24) / 100.0, img.shape)
+
+def get_label(a: int):
+    # 1: pixelize; 2: color; 3: blur
+    if a < 42:
+        return 1
+    if a < 61:
+        return 2
+    return 3
 
 def handle(img) -> Tuple[npy.ndarray, npy.ndarray, npy.ndarray]:
     w, h = img.size
@@ -82,7 +101,8 @@ def handle(img) -> Tuple[npy.ndarray, npy.ndarray, npy.ndarray]:
     boxes = []
     bound = random.randint(0, 2) + random.randint(0, 2) + 1
     choose = random.randint(0, 99)
-    color = (random.random() * 2.0 - 1, random.random() * 2.0 - 1, random.random() * 2.0 - 1)
+    color_stats = stats.beta.rvs(0.75, 0.75, size=3)
+    color = (color_stats[0] * 2.0 - 1, color_stats[1] * 2.0 - 1, color_stats[2] * 2.0 - 1)
     radius = random.randint(0, 8) + random.randint(0, 7) + 5
     mask = torch.zeros((256, 256, 3), dtype=torch.uint8)
 
@@ -116,9 +136,12 @@ def handle(img) -> Tuple[npy.ndarray, npy.ndarray, npy.ndarray]:
             mask[int(box[1]) : int(box[3]), int(box[0]) : int(box[2])] = 1
             choose_and_mask(choose, img, radius, x1, y1, x2, y2, w, h, color)
     boxes = npy.array(boxes)
-    img = npy.array(Image.fromarray(((img + 1) * 255.0 / 2.0).astype(npy.uint8)).resize((256, 256), Image.LANCZOS)).astype(npy.float32) * 2.0 / 255.0 - 1
+    img_pil = npy.array(Image.fromarray(((img + 1) * 255.0 / 2.0).astype(npy.uint8)).resize((256, 256), Image.LANCZOS))
+    if random.randint(0, 99) < 67:
+        img_pil = jpegBlur(img_pil)
+    img = img_pil.astype(npy.float32) * 2.0 / 255.0 - 1
     
-    return img, mask, boxes
+    return img, mask, boxes, get_label(choose)
 
 from pascal_voc_toolkit import XmlHandler
 from pathlib import Path
@@ -143,9 +166,12 @@ def handle_anno(img, path_anno) -> Tuple[npy.ndarray, npy.ndarray, npy.ndarray]:
             mask[int(box[1]) : int(box[3]), int(box[0]) : int(box[2])] = 1
             choose_and_mask(choose, img, radius, x1, y1, x2, y2, w, h, color)
         boxes = npy.array(boxes)
-        img = npy.array(Image.fromarray(((img + 1) * 255.0 / 2.0).astype(npy.uint8)).resize((256, 256), Image.LANCZOS)).astype(npy.float32) * 2.0 / 255.0 - 1
+        img_pil = npy.array(Image.fromarray(((img + 1) * 255.0 / 2.0).astype(npy.uint8)).resize((256, 256), Image.LANCZOS))
+        if random.randint(0, 99) < 67:
+            img_pil = jpegBlur(img_pil)
+        img = img_pil.astype(npy.float32) * 2.0 / 255.0 - 1
 
-        return img, mask, boxes
+        return img, mask, boxes, get_label(choose)
     return handle(img)
 
 class CityScapesDataset(Dataset):
@@ -158,7 +184,7 @@ class CityScapesDataset(Dataset):
         rn = random.randint(0, 1024)
         img = Image.open(path_img).convert("RGB").crop((rn, 0, rn + 1024, 1024))
         
-        img, mask, boxes = handle(img)
+        img, mask, boxes, label = handle(img)
         if self.transform is not None:
             img = self.transform(img)
         target = {
@@ -166,7 +192,7 @@ class CityScapesDataset(Dataset):
             "masks": mask,
             "image_id": path_img,
             "area": torch.tensor([] if boxes.shape[0] == 0 else (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])),
-            "labels": torch.ones((boxes.shape[0],), dtype=torch.int64),
+            "labels": label * torch.ones((boxes.shape[0],), dtype=torch.int64),
             "iscrowd": torch.zeros((boxes.shape[0],), dtype=torch.int64)
         }
         return img, target
@@ -204,7 +230,7 @@ class WoodScapeDataset(Dataset):
         path_img = self.images[item]
         img = Image.open(path_img).convert("RGB")
 
-        img, mask, boxes = handle(img)
+        img, mask, boxes, label = handle(img)
         if self.transform is not None:
             img = self.transform(img)
         target = {
@@ -212,7 +238,7 @@ class WoodScapeDataset(Dataset):
             "masks": mask,
             "image_id": path_img,
             "area": torch.tensor([] if boxes.shape[0] == 0 else (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])),
-            "labels": torch.ones((boxes.shape[0],), dtype=torch.int64),
+            "labels": label * torch.ones((boxes.shape[0],), dtype=torch.int64),
             "iscrowd": torch.zeros((boxes.shape[0],), dtype=torch.int64)
         }
         return img, target
@@ -241,7 +267,7 @@ class Fisheye8KDataset(Dataset):
         path_img = self.images[item]
         img = Image.open(path_img).convert("RGB")
 
-        img, mask, boxes = handle(img)
+        img, mask, boxes, label = handle(img)
         if self.transform is not None:
             img = self.transform(img)
         target = {
@@ -249,7 +275,7 @@ class Fisheye8KDataset(Dataset):
             "masks": mask,
             "image_id": path_img,
             "area": torch.tensor([] if boxes.shape[0] == 0 else (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])),
-            "labels": torch.ones((boxes.shape[0],), dtype=torch.int64),
+            "labels": label * torch.ones((boxes.shape[0],), dtype=torch.int64),
             "iscrowd": torch.zeros((boxes.shape[0],), dtype=torch.int64)
         }
         return img, target
@@ -285,7 +311,7 @@ class IHAZEDataset(Dataset):
             h = h // 4 * 4
             img = img.crop((0, 0, w, h)).resize((w // 4, h // 4), Image.LANCZOS)
 
-        img, mask, boxes = handle(img)
+        img, mask, boxes, label = handle(img)
         if self.transform is not None:
             img = self.transform(img)
         target = {
@@ -293,7 +319,7 @@ class IHAZEDataset(Dataset):
             "masks": mask,
             "image_id": path_img,
             "area": torch.tensor([] if boxes.shape[0] == 0 else (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])),
-            "labels": torch.ones((boxes.shape[0],), dtype=torch.int64),
+            "labels": label * torch.ones((boxes.shape[0],), dtype=torch.int64),
             "iscrowd": torch.zeros((boxes.shape[0],), dtype=torch.int64)
         }
         return img, target
@@ -324,7 +350,7 @@ class ILSVRCDataset(Dataset):
         path_anno = path_img.replace("Data", "Annotations").replace(".JPEG", ".xml")
         img = Image.open(path_img).convert("RGB")
 
-        img, mask, boxes = handle_anno(img, path_anno)
+        img, mask, boxes, label = handle_anno(img, path_anno)
         if self.transform is not None:
             img = self.transform(img)
         target = {
@@ -332,7 +358,7 @@ class ILSVRCDataset(Dataset):
             "masks": mask,
             "image_id": path_img,
             "area": (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0]),
-            "labels": torch.ones((boxes.shape[0],), dtype=torch.int64),
+            "labels": label * torch.ones((boxes.shape[0],), dtype=torch.int64),
             "iscrowd": torch.zeros((boxes.shape[0],), dtype=torch.int64)
         }
         return img, target
@@ -409,12 +435,12 @@ model = torchvision.models.detection.fasterrcnn_resnet50_fpn(num_classes=2)
 # print("Let's use", torch.cuda.device_count(), "GPUs!")
 # model = torch.nn.DataParallel(model)
 model.to(device)
-optimizer = torch.optim.RMSprop(model.parameters(), lr=1e-4, weight_decay=8e-5)
+optimizer = torch.optim.RMSprop(model.parameters(), lr=5e-3, weight_decay=8e-5)
 
 from detection.engine import train_one_epoch, evaluate
 
 for epoch in range(5):
-    train_one_epoch(model, optimizer, train_data_iter, device, epoch, print_freq=10)
+    train_one_epoch(model, optimizer, train_data_iter, device, epoch, print_freq=40)
     torch.save(model, "models/checkpoint/detector-%d.pth"%(epoch+1))
     # evaluate(model, val_data_iter, device=device, print_freq=10)
 
